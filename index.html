@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Mini Angry Birds - Faster & Better Graphics</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    background: linear-gradient(to top, #87ceeb 0%, #e0f7fa 100%);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  #gameCanvas {
+    display: block;
+    margin: 0 auto;
+    background: #a3d9ff;
+    border-radius: 16px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    touch-action: none;
+  }
+  #ui {
+    position: fixed;
+    top: 10px; left: 10px; right: 10px;
+    text-align: center;
+    color: #222;
+    font-weight: 700;
+    z-index: 10;
+    user-select: none;
+  }
+  #restartBtn {
+    background: #ff4136;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 20px;
+    color: white;
+    font-weight: 700;
+    font-size: 18px;
+    cursor: pointer;
+    margin-top: 12px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.25);
+    transition: background-color 0.3s ease;
+  }
+  #restartBtn:hover {
+    background: #ff6b5f;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div id="levelText">Level 1: Knock down all pigs 🐷!</div>
+  <div id="chancesText">Chances left: 3</div>
+  <button id="restartBtn">Restart Level</button>
+</div>
+
+<canvas id="gameCanvas" width="375" height="667"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const gravity = 0.8;
+  const friction = 0.98;
+
+  const slingshotPos = {x: 80, y: H - 140};
+  const maxDragDist = 100;
+
+  let gameState = 'aim';
+  let currentLevel = 0;
+  let chancesLeft = 3;
+
+  const birdRadius = 20;
+  const pigRadius = 16;
+  const blockSize = 40;
+
+  class Bird {
+    constructor(x,y) {
+      this.x = x;
+      this.y = y;
+      this.r = birdRadius;
+      this.vx = 0;
+      this.vy = 0;
+      this.launched = false;
+      this.rotation = 0;
+    }
+    update() {
+      if(this.launched) {
+        this.vy += gravity;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vx *= friction;
+        this.vy *= friction;
+        this.rotation = Math.atan2(this.vy, this.vx);
+
+        if(this.y + this.r > H - 50) {
+          resetAfterMiss();
+        }
+        if(this.y > H + 50 || this.x < -50 || this.x > W + 50) {
+          resetAfterMiss();
+        }
+      }
+    }
+    draw() {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rotation);
+      ctx.scale(-1, 1);
+
+      // Body with gradient & subtle shadow
+      const grad = ctx.createRadialGradient(0, 0, this.r*0.2, 0, 0, this.r);
+      grad.addColorStop(0, '#ff4d4d');
+      grad.addColorStop(1, '#a80000');
+      ctx.fillStyle = grad;
+      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.r, this.r*0.75, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // White eye with subtle shadow
+      ctx.shadowColor = 'rgba(0,0,0,0.15)';
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      ctx.fillStyle = 'white';
+      ctx.ellipse(-6, -5, 6, 8, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Pupil with gloss effect
+      ctx.shadowColor = 'transparent';
+      ctx.beginPath();
+      ctx.fillStyle = 'black';
+      ctx.ellipse(-5, -3, 3, 4, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.ellipse(-4, -5, 1.5, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Beak with gradient and slight shadow
+      ctx.shadowColor = 'rgba(0,0,0,0.2)';
+      ctx.shadowBlur = 2;
+      ctx.beginPath();
+      ctx.fillStyle = 'orange';
+      ctx.moveTo(this.r, 0);
+      ctx.lineTo(this.r + 18, -10);
+      ctx.lineTo(this.r + 18, 10);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  class Block {
+    constructor(x,y,w,h) {
+      this.x = x;
+      this.y = y;
+      this.w = w;
+      this.h = h;
+      this.health = 3;
+      this.isStatic = true;
+      this.angle = 0;
+      this.rotationSpeed = 0;
+    }
+    update() {}
+    draw() {
+      ctx.save();
+      ctx.translate(this.x + this.w/2, this.y + this.h/2);
+      ctx.rotate(this.angle);
+
+      // Wood grain gradient
+      let grad = ctx.createLinearGradient(-this.w/2, 0, this.w/2, 0);
+      grad.addColorStop(0, '#deb887');
+      grad.addColorStop(0.5, '#a0522d');
+      grad.addColorStop(1, '#8b4513');
+      ctx.fillStyle = grad;
+      ctx.shadowColor = 'rgba(0,0,0,0.15)';
+      ctx.shadowBlur = 5;
+      ctx.shadowOffsetX = 3;
+      ctx.shadowOffsetY = 3;
+      ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+
+      // Wood grain lines
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = '#5a3318cc';
+      ctx.lineWidth = 2;
+      for(let i = -this.h/2 + 5; i < this.h/2; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(-this.w/2, i);
+        ctx.lineTo(this.w/2, i+1);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  class Pig {
+    constructor(x,y) {
+      this.x = x;
+      this.y = y;
+      this.r = pigRadius;
+      this.alive = true;
+    }
+    draw() {
+      if(!this.alive) return;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // Green body gradient with shadow
+      const grad = ctx.createRadialGradient(0, 0, this.r*0.2, 0, 0, this.r);
+      grad.addColorStop(0, '#7ed57e');
+      grad.addColorStop(1, '#276227');
+      ctx.fillStyle = grad;
+      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.r, this.r*0.85, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+      // Ears
+      ctx.fillStyle = '#4caf50';
+      ctx.beginPath();
+      ctx.ellipse(-10, -15, 7, 9, Math.PI/5, 0, Math.PI*2);
+      ctx.ellipse(10, -15, 7, 9, -Math.PI/5, 0, Math.PI*2);
+      ctx.fill();
+
+      // Eyes whites
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.ellipse(-7, -5, 5, 6, 0, 0, Math.PI*2);
+      ctx.ellipse(7, -5, 5, 6, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Pupils
+      ctx.fillStyle = 'black';
+      ctx.beginPath();
+      ctx.ellipse(-7, -5, 2, 3, 0, 0, Math.PI*2);
+      ctx.ellipse(7, -5, 2, 3, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Eye highlights
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.ellipse(-6, -6, 1.7, 2.2, 0, 0, Math.PI*2);
+      ctx.ellipse(8, -6, 1.7, 2.2, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // Snout & nose
+      ctx.fillStyle = '#388e3c';
+      ctx.beginPath();
+      ctx.ellipse(0, 5, 8, 4, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = '#2e7d32';
+      ctx.beginPath();
+      ctx.ellipse(-3, 5, 2, 2, 0, 0, Math.PI*2);
+      ctx.ellipse(3, 5, 2, 2, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  // Levels data (10 levels)
+  const levels = [
+    {
+      blocks: [
+        {x: 250, y: H - 90, w: blockSize, h: blockSize},
+        {x: 290, y: H - 90, w: blockSize, h: blockSize},
+        {x: 270, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 280, y: H - 160},
+        {x: 320, y: H - 130},
+      ],
+    },
+    {
+      blocks: [
+        {x: 230, y: H - 90, w: blockSize, h: blockSize},
+        {x: 270, y: H - 90, w: blockSize, h: blockSize},
+        {x: 310, y: H - 90, w: blockSize, h: blockSize},
+        {x: 350, y: H - 90, w: blockSize, h: blockSize},
+        {x: 230, y: H - 130, w: blockSize, h: blockSize},
+        {x: 350, y: H - 130, w: blockSize, h: blockSize},
+        {x: 270, y: H - 170, w: blockSize, h: blockSize},
+        {x: 310, y: H - 170, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 260, y: H - 160},
+        {x: 320, y: H - 160},
+        {x: 280, y: H - 200},
+        {x: 340, y: H - 200},
+        {x: 300, y: H - 230},
+      ],
+    },
+    {
+      blocks: [
+        {x: 280, y: H - 90, w: blockSize, h: blockSize},
+        {x: 320, y: H - 90, w: blockSize, h: blockSize},
+        {x: 360, y: H - 90, w: blockSize, h: blockSize},
+        {x: 300, y: H - 130, w: blockSize, h: blockSize},
+        {x: 340, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 330, y: H - 160},
+        {x: 370, y: H - 160},
+      ],
+    },
+    {
+      blocks: [
+        {x: 240, y: H - 90, w: blockSize, h: blockSize},
+        {x: 280, y: H - 90, w: blockSize, h: blockSize},
+        {x: 320, y: H - 90, w: blockSize, h: blockSize},
+        {x: 280, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 310, y: H - 160},
+      ],
+    },
+    {
+      blocks: [
+        {x: 270, y: H - 90, w: blockSize, h: blockSize},
+        {x: 310, y: H - 90, w: blockSize, h: blockSize},
+        {x: 350, y: H - 90, w: blockSize, h: blockSize},
+        {x: 270, y: H - 130, w: blockSize, h: blockSize},
+        {x: 350, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 310, y: H - 160},
+        {x: 330, y: H - 140},
+      ],
+    },
+    {
+      blocks: [
+        {x: 250, y: H - 90, w: blockSize, h: blockSize},
+        {x: 290, y: H - 90, w: blockSize, h: blockSize},
+        {x: 330, y: H - 90, w: blockSize, h: blockSize},
+        {x: 270, y: H - 130, w: blockSize, h: blockSize},
+        {x: 310, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 290, y: H - 160},
+      ],
+    },
+    {
+      blocks: [
+        {x: 230, y: H - 90, w: blockSize, h: blockSize},
+        {x: 270, y: H - 90, w: blockSize, h: blockSize},
+        {x: 310, y: H - 90, w: blockSize, h: blockSize},
+        {x: 350, y: H - 90, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 270, y: H - 140},
+        {x: 310, y: H - 140},
+      ],
+    },
+    {
+      blocks: [
+        {x: 260, y: H - 90, w: blockSize, h: blockSize},
+        {x: 300, y: H - 90, w: blockSize, h: blockSize},
+        {x: 340, y: H - 90, w: blockSize, h: blockSize},
+        {x: 260, y: H - 130, w: blockSize, h: blockSize},
+        {x: 340, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 300, y: H - 160},
+      ],
+    },
+    {
+      blocks: [
+        {x: 250, y: H - 90, w: blockSize, h: blockSize},
+        {x: 290, y: H - 90, w: blockSize, h: blockSize},
+        {x: 330, y: H - 90, w: blockSize, h: blockSize},
+        {x: 370, y: H - 90, w: blockSize, h: blockSize},
+        {x: 250, y: H - 130, w: blockSize, h: blockSize},
+        {x: 370, y: H - 130, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 290, y: H - 160},
+        {x: 330, y: H - 160},
+      ],
+    },
+    {
+      blocks: [
+        {x: 280, y: H - 90, w: blockSize, h: blockSize},
+        {x: 320, y: H - 90, w: blockSize, h: blockSize},
+        {x: 360, y: H - 90, w: blockSize, h: blockSize},
+      ],
+      pigs: [
+        {x: 310, y: H - 140},
+      ],
+    },
+  ];
+
+  let bird, blocks, pigs;
+
+  function dist(x1,y1,x2,y2){
+    return Math.hypot(x2 - x1, y2 - y1);
+  }
+
+  function circleRectColliding(circle, rect) {
+    // Find closest point to circle center on rectangle
+    let closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.w));
+    let closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.h));
+    let distance = dist(circle.x, circle.y, closestX, closestY);
+    return distance < circle.r;
+  }
+
+  function circleCircleColliding(c1, c2) {
+    return dist(c1.x, c1.y, c2.x, c2.y) < c1.r + c2.r;
+  }
+
+  function resetAfterMiss() {
+    if (gameState !== 'launched') return;
+    chancesLeft--;
+    updateUI();
+    if(chancesLeft <= 0) {
+      alert('Out of chances! Restarting level.');
+      startLevel(currentLevel);
+    } else {
+      spawnBird();
+      gameState = 'aim';
+    }
+  }
+
+  function updateUI() {
+    document.getElementById('levelText').textContent = `Level ${currentLevel + 1}: Knock down all pigs 🐷!`;
+    document.getElementById('chancesText').textContent = `Chances left: ${chancesLeft}`;
+  }
+
+  function startLevel(levelIndex) {
+    currentLevel = levelIndex;
+    chancesLeft = 3;
+    const lvl = levels[levelIndex];
+    blocks = lvl.blocks.map(b => new Block(b.x, b.y, b.w, b.h));
+    pigs = lvl.pigs.map(p => new Pig(p.x, p.y));
+    spawnBird();
+    gameState = 'aim';
+    updateUI();
+  }
+
+  function spawnBird() {
+    bird = new Bird(slingshotPos.x, slingshotPos.y);
+  }
+
+  let dragStart = null;
+  let dragEnd = null;
+  let dragging = false;
+
+  function onPointerDown(e) {
+    if(gameState !== 'aim') return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    if(dist(x, y, bird.x, bird.y) <= bird.r + 10) {
+      dragging = true;
+      dragStart = {x, y};
+      dragEnd = {x, y};
+    }
+  }
+
+  function onPointerMove(e) {
+    if(!dragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    dragEnd = {x, y};
+    let dx = dragEnd.x - slingshotPos.x;
+    let dy = dragEnd.y - slingshotPos.y;
+    let distDrag = Math.min(maxDragDist, Math.hypot(dx, dy));
+    let angle = Math.atan2(dy, dx);
+    bird.x = slingshotPos.x + distDrag * Math.cos(angle);
+    bird.y = slingshotPos.y + distDrag * Math.sin(angle);
+  }
+
+  function onPointerUp(e) {
+    if(!dragging) return;
+    dragging = false;
+    let dx = slingshotPos.x - bird.x;
+    let dy = slingshotPos.y - bird.y;
+    let velocityScale = 0.11 * 1.1; // 10% faster shot
+    bird.vx = dx * velocityScale;
+    bird.vy = dy * velocityScale;
+    bird.launched = true;
+    gameState = 'launched';
+  }
+
+  function checkCollisions() {
+    // Bird hitting blocks
+    for(let b of blocks) {
+      if(circleRectColliding(bird, b)) {
+        b.health--;
+        if(b.health <= 0) {
+          // Remove block (mark offscreen)
+          b.x = -1000;
+          b.y = -1000;
+        }
+        // Bounce bird back with some velocity reduction
+        bird.vx = -bird.vx * 0.6;
+        bird.vy = -bird.vy * 0.6;
+      }
+    }
+    // Bird hitting pigs
+    for(let p of pigs) {
+      if(p.alive && circleCircleColliding(bird, p)) {
+        p.alive = false;
+      }
+    }
+  }
+
+  function allPigsDead() {
+    return pigs.every(p => !p.alive);
+  }
+
+  function drawSlingshot() {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Wood base
+    ctx.fillStyle = '#8b5e3c';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.moveTo(slingshotPos.x - 12, slingshotPos.y + 50);
+    ctx.lineTo(slingshotPos.x + 12, slingshotPos.y + 50);
+    ctx.lineTo(slingshotPos.x + 20, slingshotPos.y - 10);
+    ctx.lineTo(slingshotPos.x - 20, slingshotPos.y - 10);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Rubber band if dragging or aiming
+    if(gameState === 'aim') {
+      ctx.strokeStyle = '#643A07';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(slingshotPos.x - 15, slingshotPos.y - 10);
+      ctx.lineTo(bird.x, bird.y);
+      ctx.lineTo(slingshotPos.x + 15, slingshotPos.y - 10);
+      ctx.stroke();
+    }
+  }
+
+  function drawGround() {
+    ctx.fillStyle = '#654321';
+    ctx.fillRect(0, H - 50, W, 50);
+
+    // Grass top
+    const grassHeight = 12;
+    let gradient = ctx.createLinearGradient(0, H - 50, 0, H - 50 - grassHeight);
+    gradient.addColorStop(0, '#2b7a0b');
+    gradient.addColorStop(1, '#8cbb12');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, H - 50 - grassHeight, W, grassHeight);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    drawGround();
+    drawSlingshot();
+
+    for(let b of blocks) b.draw();
+    for(let p of pigs) p.draw();
+    bird.draw();
+
+    // Draw aiming line if dragging
+    if(dragging) {
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(slingshotPos.x, slingshotPos.y);
+      ctx.lineTo(bird.x, bird.y);
+      ctx.stroke();
+    }
+  }
+
+  function gameLoop() {
+    if(gameState === 'launched') {
+      bird.update();
+      checkCollisions();
+      if(allPigsDead()) {
+        alert(`Level ${currentLevel + 1} cleared!`);
+        currentLevel++;
+        if(currentLevel >= levels.length) {
+          alert('You finished all levels! Great job! 🎉');
+          currentLevel = 0;
+        }
+        startLevel(currentLevel);
+        return;
+      }
+    }
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  canvas.addEventListener('mousedown', onPointerDown);
+  canvas.addEventListener('touchstart', onPointerDown, {passive:true});
+  canvas.addEventListener('mousemove', onPointerMove);
+  canvas.addEventListener('touchmove', onPointerMove, {passive:true});
+  canvas.addEventListener('mouseup', onPointerUp);
+  canvas.addEventListener('touchend', onPointerUp);
+
+  document.getElementById('restartBtn').onclick = () => {
+    startLevel(currentLevel);
+  };
+
+  startLevel(currentLevel);
+  gameLoop();
+
+})();
+</script>
+
+</body>
+</html>
